@@ -1,0 +1,438 @@
+<?php
+
+/**
+ * Implements hook_init().
+ *
+ * Loads the field definitiona into field_markup_settings
+ */
+function field_markup_init() {
+  tf_functions_load_json('field_markup');
+}
+
+/**
+ * Impliments hook_theme_registry_alter
+ *
+ * Replaces default Drupal and Display Suite field preprocessor functions with
+ * this modules functions
+ */
+function field_markup_theme_registry_alter(&$theme_registry) {
+
+  /**
+   * Get saved variables and fail if no variables found
+   */ 
+  $markup = variable_get('field_markup_settings',false);
+  if($markup === false) {return;} // bail if markup could not be found
+  
+  /**
+   * Set up internal variables
+   */ 
+  $theme_path = drupal_get_path('module', 'field_markup');
+  $theme_keys = array(
+                  'field_markup',
+                  'theme_ds_field_reset',
+                  'theme_ds_field_minimal',
+                  'theme_ds_field_expert',
+                  'field'
+                );
+  
+  /**
+   * Run through the theme keys and replace preprocess and theme functions with
+   * this modules functions
+   */
+  foreach($theme_keys as $theme_key) {
+    if (isset($theme_registry[$theme_key])) {
+      $theme_registry[$theme_key]['function']               = '_field_markup_field';
+      $theme_registry[$theme_key]['preprocess functions'][] = '_field_markup_preprocess_field';
+//    $theme_registry[$theme_key]['preprocess functions']   = array('_field_markup_preprocess_field');
+      $theme_registry[$theme_key]['theme path']             = $theme_path;
+    }
+  }
+
+}
+
+/**
+ * (Internal) Preprocess a field and add markup
+ *
+ * An internal function for this module that replaces the default Drupal and
+ * Display Suite preprocess functions.  Reads the JSON file and generates the
+ * field definition keys and markup that will be used to create the field output.
+ *
+ * There are no return variables, but the funtion does modify the $variables
+ * array to add it's own keys and values.  These do not overwrite any default
+ * keys and are otherwise ignored by Drupal.
+ *
+ * @param array variables
+ *   An array passed by Drupal containing all information about a specific field
+ *   instance.
+ *
+ * @param string hook
+ *   A string passed by Drupal, not used in this module
+ */ 
+function _field_markup_preprocess_field (&$variables, $hook) {
+
+  /**
+   * Get saved variables and fail if no variables found
+   */ 
+  $markup       = variable_get('field_markup_settings',false);
+  if($markup === false) {return;} // bail if markup could not be found
+
+  /**
+   * Get important information about the field
+   */ 
+  $field_name   = $variables['element']['#field_name'];
+  $view_mode    = $variables['element']['#view_mode'];
+  $bundle       = $variables['element']['#bundle'];
+  $entity_type  = $variables['element']['#entity_type'];
+  
+  /**
+   * Set up internal variables
+   */ 
+  $markup_field = array();  // Array that will be processed into the final markup
+  $markup_found = false;    // Flag to mark if any markup was found
+
+  /**
+   * Set up new elements in $variables array
+   */ 
+  $variables['wrapper_outer_open']  = '';
+  $variables['wrapper_outer_close'] = '';
+  $variables['wrapper_title_open']  = '';
+  $variables['wrapper_title_close'] = '';
+  $variables['wrapper_inner_open']  = '';
+  $variables['wrapper_inner_close'] = '';
+  $variables['wrapper_item_open']   = array();
+  $variables['wrapper_item_close']  = array();
+ 
+  /**
+   * Get final markup array
+   */
+  
+  /** Check if a global default exists **/
+  if(isset($markup['#default#'])) {
+    $markup_field = $markup['#default#'];
+    $markup_found = true;
+  }
+
+  /** Check if a definition has been set up for the field and use those settings **/
+  if(isset($markup[$field_name])) {
+
+    $markup_field = $markup[$field_name];
+    
+    /** Check if the definition targets a specific view mode and use those settings **/
+    if(isset($markup_field['view-mode:'.$view_mode])) {
+      $markup_field = $markup_field['view-mode:'.$view_mode];
+    }
+    
+    /** Check if the definition targets a specific bundle and use those settings **/
+    if(isset($markup_field['bundle:'.$bundle])) {
+      $markup_field = $markup_field['bundle:'.$bundle];
+    }
+
+    /** Check if the definition uses a template and use those settings  **/
+    if(isset($markup_field['template']) && isset($markup[$markup_field['template']])) {
+      $markup_template = $markup[$markup_field['template']];
+      $markup_field = array_replace_recursive($markup_template,$markup_field);
+    }
+    $markup_found = true;
+  }
+
+  /**
+   * Markup definition was found, process wrapper settings
+   */ 
+  if($markup_found) {
+    $variables['wrapper_outer_open']  = isset($markup_field['outer-wrapper']) ? _field_markup_create_open($markup_field['outer-wrapper'],$variables,'outer') : '';
+    $variables['wrapper_outer_close'] = isset($markup_field['outer-wrapper']) ? _field_markup_create_close($markup_field['outer-wrapper'],$variables,'outer') : '';
+    $variables['wrapper_title_open']  = isset($markup_field['title-wrapper']) ? _field_markup_create_open($markup_field['title-wrapper'],$variables,'title') : '';
+    $variables['wrapper_title_close'] = isset($markup_field['title-wrapper']) ? _field_markup_create_close($markup_field['title-wrapper'],$variables,'title') : '';
+    $variables['wrapper_inner_open']  = isset($markup_field['inner-wrapper']) ? _field_markup_create_open($markup_field['inner-wrapper'],$variables,'inner') : '';
+    $variables['wrapper_inner_close'] = isset($markup_field['inner-wrapper']) ? _field_markup_create_close($markup_field['inner-wrapper'],$variables,'inner') : '';
+    
+    $item_count = count($variables['items']);
+    
+    foreach ($variables['items'] as $delta => $item) {
+      $variables['wrapper_item_open'][$delta]   = isset($markup_field['item-wrapper']) ? _field_markup_create_open($markup_field['item-wrapper'],$variables,'item',$delta, $item_count) : '';
+      $variables['wrapper_item_close'][$delta]  = isset($markup_field['item-wrapper']) ? _field_markup_create_close($markup_field['item-wrapper'],$variables,'item',$delta) : '';
+    }
+    
+    /** Use #hide# to remove the field label **/
+    if(isset($markup_field['title-wrapper']['markup']) ) {
+      if ( $markup_field['title-wrapper']['markup'] == "#hide#") {
+        $variables['label_hidden'] = true;
+      } else {
+        $variables['label_hidden'] = false;
+      }
+    }
+
+    /** Use the value of the 'label' key to set the field label **/
+    if(isset($markup_field['label'])) {
+      $variables['label'] = $markup_field['label'];
+      $variables['label_hidden'] = false;
+    }
+    
+    /** Call any modules that want to alter the markup or field contents **/
+    if(isset($markup_field['alter'])) {
+      foreach($markup_field['alter'] as $alter_type => $alter_data) {
+        drupal_alter($alter_type, $variables, $alter_data );
+      }
+    }
+
+  /**
+   * No markup definition was found for the field, use default markup
+   */ 
+  } else {
+    $variables['wrapper_outer_open'] = '<div id="'.$field_name.'">';
+    $variables['wrapper_outer_close'] = '</div>';
+    $variables['wrapper_title_open'] = '';
+    $variables['wrapper_title_close'] = '';
+    $variables['wrapper_inner_open'] = '';
+    $variables['wrapper_inner_close'] = '';
+    foreach ($variables['items'] as $delta => $item) {
+      $variables['wrapper_item_open'][$delta]   = '';
+      $variables['wrapper_item_close'][$delta]  = '';
+    }
+  }
+
+}
+
+/**
+ * (Internal) Generate the opening tag markup
+ *
+ * An internal function for this module that takes the JSON settings and generates
+ * the opening tags for the markup.
+ *
+ * @param array wrapper_markup
+ *   The array of settings for this wrapper as defined in JSON
+ *
+ * @param array variables
+ *   The original variables variable passed by Drupal to _field_markup_preprocess_field
+ *
+ * @param string hook
+ *   A string indicating what level the wrapper is for:
+ *   * outer
+ *   * title
+ *   * inner
+ *   * item
+ *
+ * @param integer delta
+ *   (optional) Valid only for item wrappers, the numerical index of this item
+ *
+ * @param integer item_count
+ *   (optional) Valid only for item wrappers, the total number of items in the field
+ *
+ * @return string
+ *   The final opening tag markup
+ */ 
+function _field_markup_create_open($wrapper_markup, &$variables, $hook, $delta = null, $item_count = null) {
+
+  /**
+   * Set initial variable values
+   */
+  $wrapper_open = '';
+  $field_name = $variables['element']['#field_name'];
+  $node_id    = isset($variables['element']['#object']->nid) ? $variables['element']['#object']->nid : 0;
+
+  $zebra      = '';
+  $firstlast  = '';
+
+  /**
+   * Get values for placeholders
+   */
+  switch ($hook) {
+     case 'outer':
+      $classes    = isset($variables['classes_array'])    ? implode(' ',$variables['classes_array']) : '';
+      $attributes = isset($variables['attributes_array']) ? implode(' ',$variables['attributes_array']) : '';
+      $prefix     = isset($wrapper_markup['prefix'])      ? $wrapper_markup['prefix'] : '';
+      $zebra      = '';
+      break;
+    case 'title':
+      $classes    = '';
+      $attributes = isset($variables['attributes']) ? implode(' ',$variables['attributes']) : '';
+      $prefix     = isset($wrapper_markup['prefix'])      ? $wrapper_markup['prefix'] : '';
+      $zebra      = '';
+      break;
+    case 'inner':
+      $classes    = '';
+      $attributes = isset($variables['content_attributes']) ? implode(' ',$variables['content_attributes']) : '';
+      $prefix     = isset($wrapper_markup['prefix'])        ? $wrapper_markup['prefix'] : '';
+      $zebra      = '';
+      break;
+    case 'item' :
+      $classes    = '';
+      $attributes = isset($variables['item_attributes'][$delta])  ? implode(' ',$variables['item_attributes'][$delta]) : '';
+      $prefix     = isset($wrapper_markup['prefix'])              ? $wrapper_markup['prefix'] : '';
+      $zebra      = $delta % 2 ? 'odd' : 'even';
+      $firstlast  = ( $delta == 0 ? 'first' : ( $delta+1 == $item_count ? 'last' : '' ) );
+      break;
+    default :
+      $classes    = '';
+      $attributes = '';
+      $prefix     = '';
+      $suffix     = '';
+      $zebra      = '';
+      break;
+  }
+  
+  /**
+   * If markup key is set, generate the opening tag
+   */ 
+  if (isset($wrapper_markup['markup']) && $wrapper_markup['markup'] != '#none#') {
+    $wrapper_open  = '<'.$wrapper_markup['markup'];
+    
+    /** Add id property (if set) and replace placeholders with content **/
+    if(isset($wrapper_markup['id']) && $wrapper_markup['id'] != '#none#') {
+      $wrapper_open .= ' id="'.$wrapper_markup['id'].'"';
+      $wrapper_open = str_replace('#fieldid#',$field_name,$wrapper_open);
+      $wrapper_open = str_replace('#nodeid#',$node_id,$wrapper_open);
+    }
+    
+    /** Add class property (if set) and replace placeholders with content **/
+    if(isset($wrapper_markup['class']) && $wrapper_markup['class'] != '#none#') {
+      $wrapper_open .= ' class="'. $wrapper_markup['class'] . '"';
+      $wrapper_open  = str_replace('#fieldid#'    ,$field_name, $wrapper_open);
+      $wrapper_open  = str_replace('#merge#'      ,$classes,    $wrapper_open);
+      $wrapper_open  = str_replace('#zebra#'      ,$zebra,      $wrapper_open);
+      $wrapper_open  = str_replace('#delta#'      ,$delta+1,    $wrapper_open);
+      $wrapper_open  = str_replace('#count#'      ,$delta+1,    $wrapper_open);
+      $wrapper_open  = str_replace('#firstlast#'  ,$firstlast,  $wrapper_open);
+    }
+ 
+    /** Add attributes property (if set) **/   
+    if(isset($wrapper_markup['attributes']) && $wrapper_markup['attributes'] != '#none#') {
+      $wrapper_open .= ' ' . $wrapper_markup['attributes'];
+      $wrapper_open  = str_replace('#merge#',$attributes,$wrapper_open);
+    }
+    
+    /** Finish tag **/
+    $wrapper_open  .= '>' . $prefix;
+  }
+  
+  /**
+   * If wrappers key is set, process wrappers settings
+   */
+  if (isset($wrapper_markup['wrappers'])) {
+    foreach ($wrapper_markup['wrappers'] as $wrapper_group) {
+      /** Call this function recursivly **/
+      $wrapper_open .=  _field_markup_create_open($wrapper_group,$variables, $hook, $delta);
+    }
+  }
+  
+  /**
+   * Process remove key
+   *
+   * This is a straight up hack to deal with the field title
+   */
+  if (isset($wrapper_markup['remove'])) {
+    $remove_pattern = '/<\/??'.$wrapper_markup['remove'].'.*?>/';
+    
+    foreach ($variables['items'] as &$item ) {
+      $item['#markup'] = preg_replace($remove_pattern,'',$item['#markup']);
+    }
+  }
+  
+  /**
+   * Whew - we're done
+   */
+  return $wrapper_open;
+  
+}
+
+/**
+ * (Internal) Generate the closing tag markup
+ *
+ * An internal function for this module that takes the JSON settings and generates
+ * the opening tags for the markup.
+ *
+ * @param array wrapper_markup
+ *   The array of settings for this wrapper as defined in JSON
+ *
+ * @param array variables
+ *   The original variables variable passed by Drupal to _field_markup_preprocess_field
+ *
+ * @param string hook
+ *   A string indicating what level the wrapper is for:
+ *   * outer
+ *   * title
+ *   * inner
+ *   * item
+ *
+ * @param integer delta
+ *   (optional) Valid only for item wrappers, the numerical index of this item
+ *
+ *
+ * @return string
+ *   The final closing tag markup
+ */ 
+function _field_markup_create_close($wrapper_markup, &$variables, $hook, $delta = null) {
+
+  /**
+   * Set initial variable values
+   */
+  $wrapper_close  = '';
+  $suffix         = isset($wrapper_markup['suffix']) ? $wrapper_markup['suffix'] : '';
+
+  /**
+   * If markup key is set, generate the opening tag
+   */ 
+  if(isset($wrapper_markup['markup']) && $wrapper_markup['markup'] != '#none#') {
+    $wrapper_close = $suffix . '</' . $wrapper_markup['markup'] . '>';
+  }
+  
+  /**
+   * If wrappers key is set, process wrappers settings
+   */
+  if (isset($wrapper_markup['wrappers'])) {
+    foreach ($wrapper_markup['wrappers'] as $wrapper_group) {
+      $wrapper_close =  _block_markup_create_close($wrapper_group,$variables, $hook) . $wrapper_close;
+    }
+  }
+  
+  /**
+   * Whew - we're done
+   */
+  return $wrapper_close;
+
+}
+
+/**
+ * (Internal) Generate the field contents
+ *
+ * An internal function that replaces the default Drupal field content
+ * generator
+ *
+ * @param array $variables
+ *   An array of values supplied by Drupal 
+ *
+ * @return string
+ *   The final field content and markup
+ */ 
+function _field_markup_field ($variables) {
+
+  /**
+   * Set initial variable values
+   */
+  $output = '';
+
+  /**
+   * Render the label, if it's not hidden.
+   */
+  if (!$variables['label_hidden']) {
+    $output .= $variables['wrapper_title_open'] . $variables['label'] . $variables['wrapper_title_close'];
+  }
+
+  /**
+   * Render the items
+   */
+  $output .= $variables['wrapper_inner_open'];
+  foreach ($variables['items'] as $delta => $item) {
+    $output .= $variables['wrapper_item_open'][$delta] . drupal_render($item) . $variables['wrapper_item_close'][$delta];
+  }
+  $output .= $variables['wrapper_inner_close'];
+
+  /**
+   * Render the top-level DIV.
+   */
+  $output = $variables['wrapper_outer_open'] . $output . $variables['wrapper_outer_close'] ;
+
+  return $output;
+}
+
+

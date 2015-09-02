@@ -1,0 +1,60 @@
+{
+  /**
+   * The #default# template is used when no other markup settings are found
+   * for a field.  This format echos Drupals default output
+   */
+  "#default#" : {
+    "outer-wrapper" : {
+      "markup"      : "div",
+      "id"          : "#fieldid#",
+      "class"       : "#merge#",
+      "attributes"  : "#merge#"
+    },
+    "title-wrapper" : {
+      "markup"      : "div",
+      "id"          : "#none#",
+      "class"       : "field-label",
+      "attributes"  : "#none#",
+      "suffix"      : ": "
+    },
+    "inner-wrapper" : {
+      "markup"      : "div",
+      "id"          : "#none#",
+      "class"       : "field-items",
+      "attributes"  : "#none#"
+    },
+    "item-wrapper"  : {
+      "markup"      : "div",
+      "id"          : "#none#",
+      "class"       : "field-item #zebra#",
+      "attributes"  : "#none#"
+    }
+  },
+  
+  /**
+   * The title field is required and exists for all content types.  A view mode
+   * may not use it, but the node will have it.
+   */
+  "title" : {
+    /**
+     * Default settings
+     */
+    "template" : "#clean#",
+    "item-wrapper"  : {
+      "markup"      : "h1",
+      "remove"      : "h2",
+      "class"       : "#fieldid# page-title "
+    },
+    
+    /**
+     * Settings used when used in teaser view
+     */
+    "view-mode:teaser" : {
+      "item-wrapper"  : {
+        "markup"      : "p",
+        "remove"      : "h2",
+        "class"       : "#fieldid# teaser-title"
+      }
+    }
+  }
+}
